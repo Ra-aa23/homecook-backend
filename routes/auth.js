@@ -71,4 +71,52 @@ router.put('/profile', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// POST /api/auth/forgot-password — verify email + phone
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email required' });
+
+    const user = await db.users.findOne({ email, is_active: true });
+    if (!user) return res.status(404).json({ error: 'No account found with this email' });
+
+    // Return masked phone for verification hint
+    const maskedPhone = user.phone
+      ? user.phone.replace(/\d(?=\d{2})/g, '*')
+      : null;
+
+    res.json({
+      message: 'Account found',
+      hasPhone: !!user.phone,
+      maskedPhone,
+      userId: user._id
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/auth/reset-password — verify phone + set new password
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { email, phone, newPassword } = req.body;
+    if (!email || !phone || !newPassword)
+      return res.status(400).json({ error: 'Email, phone and new password required' });
+    if (newPassword.length < 6)
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
+    const user = await db.users.findOne({ email, is_active: true });
+    if (!user) return res.status(404).json({ error: 'Account not found' });
+
+    // Verify phone matches
+    const normalizePhone = (p) => p.replace(/\D/g, '');
+    if (!user.phone || normalizePhone(user.phone) !== normalizePhone(phone)) {
+      return res.status(401).json({ error: 'Phone number does not match our records' });
+    }
+
+    const hash = bcrypt.hashSync(newPassword, 10);
+    await db.users.update({ _id: user._id }, { $set: { password: hash } });
+
+    res.json({ message: 'Password reset successfully! You can now login.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
